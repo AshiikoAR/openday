@@ -14,6 +14,8 @@ from tkinter import Menu, FALSE
 from functools import partial
 from json import load as json_load
 from json import dump as json_dump
+from datetime import datetime
+import csv
 
 from copy import deepcopy
 
@@ -49,6 +51,10 @@ class Calculadora(object):
             self.theme = self._get_theme('Default Theme For MacOS')
         else:
             self.theme = self._get_theme(self.settings['current_theme'])
+
+
+        # Historique des calculs
+        self._history = self._load_history()
 
         # Edição da Top-Level
         self.master.title('Calculadora Tk')
@@ -119,6 +125,14 @@ class Calculadora(object):
 
         config.add_separator()
         config.add_command(label='Sair', command=self._exit)
+
+        # Historique
+        history = Menu(calc_menu)
+        calc_menu.add_cascade(label='Historique', menu=history)
+        history.add_command(label='Afficher…', command=self._show_history)
+        history.add_command(label='Effacer', command=self._clear_history)
+        history.add_command(label='Exporter CSV', command=self._export_history_csv)
+
 
     def _change_theme_to(self, name='Dark'):
         self.settings['current_theme'] = name
@@ -314,8 +328,11 @@ class Calculadora(object):
         if self._entrada.get() == 'Erro':
             return
 
-        result = self.calc.calculation(self._entrada.get())
+        expr = self._entrada.get()
+        result = self.calc.calculation(expr)
         self._set_result_in_input(result=result)
+        if result != 'Erro':
+            self._append_history(expr, result)
 
     def _set_result_in_input(self, result=0):
         """Seta o resultado de toda a operação dentro do input"""
@@ -331,6 +348,98 @@ class Calculadora(object):
             return False
         return True
             
+
+    def _history_file_path(self):
+        return './app/settings/history.json'
+
+    def _load_history(self):
+        try:
+            with open(self._history_file_path(), mode='r', encoding='utf-8') as f:
+                import json as _json
+                data = _json.load(f)
+                if isinstance(data, list):
+                    return data
+                return []
+        except FileNotFoundError:
+            return []
+        except Exception:
+            return []
+
+    def _save_history(self):
+        try:
+            with open(self._history_file_path(), mode='w', encoding='utf-8') as f:
+                import json as _json
+                _json.dump(self._history, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _append_history(self, expr, result):
+        try:
+            entry = {
+                'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'expression': str(expr),
+                'result': str(result),
+            }
+            self._history.append(entry)
+            if len(self._history) > 200:
+                self._history = self._history[-200:]
+            self._save_history()
+        except Exception:
+            pass
+
+    def _clear_history(self):
+        self._history = []
+        self._save_history()
+
+    def _export_history_csv(self):
+        try:
+            path = './app/settings/history.csv'
+            with open(path, mode='w', newline='', encoding='utf-8') as f:
+                import csv as _csv
+                w = _csv.writer(f)
+                w.writerow(['time','expression','result'])
+                for e in self._history:
+                    w.writerow([e.get('time',''), e.get('expression',''), e.get('result','')])
+            self._flash_info('Export réussi', f'Exporté vers {path}')
+        except Exception as e:
+            self._flash_info('Erreur export', str(e))
+
+    def _flash_info(self, title, message):
+        try:
+            top = tk.Toplevel(self.master)
+            top.title(title)
+            tk.Label(top, text=message, padx=12, pady=8).pack()
+            tk.Button(top, text='OK', command=top.destroy).pack(pady=6)
+            top.resizable(False, False)
+        except Exception:
+            pass
+
+    def _show_history(self):
+        win = tk.Toplevel(self.master)
+        win.title('Historique des calculs')
+        win.geometry('360x420')
+        frame = tk.Frame(win, bg=self.theme.get('frame_bg', '#ffffff'))
+        frame.pack(fill='both', expand=True)
+        listbox = tk.Listbox(frame)
+        listbox.pack(fill='both', expand=True, padx=8, pady=8)
+        for e in self._history:
+            listbox.insert('end', f"{e.get('time','')}  |  {e.get('expression','')} = {e.get('result','')}")
+        def copy_selected_to_input(event=None):
+            try:
+                sel = listbox.get(listbox.curselection())
+                if '|' in sel and '=' in sel:
+                    expr = sel.split('|',1)[1].split('=',1)[0].strip()
+                    self._entrada.delete(0, len(self._entrada.get()))
+                    self._entrada.insert(0, expr)
+            except Exception:
+                pass
+        listbox.bind('<Double-Button-1>', copy_selected_to_input)
+        btns = tk.Frame(win)
+        btns.pack(fill='x', padx=8, pady=8)
+        tk.Button(btns, text='Copier dans le champ', command=copy_selected_to_input).pack(side='left')
+        tk.Button(btns, text='Fermer', command=win.destroy).pack(side='right')
+        win.resizable(False, False)
+
     def start(self):
         print('\33[92mCalculadora Tk Iniciada. . .\33[m\n')
         self.master.mainloop()
@@ -342,3 +451,4 @@ class Calculadora(object):
 
     def _exit(self):
         exit()
+ 
